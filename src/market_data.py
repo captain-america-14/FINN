@@ -3,6 +3,7 @@ import logging
 import pandas as pd
 import yfinance as yf
 
+from src.alerts import load_alert_config, thresholds_for
 from src.config import PRICE_CACHE_DIR, PRICE_PERIOD
 from src.metrics import compute_snapshot
 from src.portfolio import to_yf_symbol
@@ -95,21 +96,41 @@ def fetch_prices(tickers: list, period: str = PRICE_PERIOD) -> dict:
     return results
 
 
-def build_snapshot_table(companies: pd.DataFrame) -> pd.DataFrame:
-    """One row per company with the latest price/volume metrics."""
-    prices = fetch_prices(companies["ticker"].tolist())
+def build_snapshot_table(
+    companies: pd.DataFrame, prices: dict = None, alert_config: dict = None
+) -> pd.DataFrame:
+    """One row per company with the latest price/volume metrics and alert flags.
+
+    prices: output of fetch_prices(). If None, it is fetched here.
+    alert_config: saved thresholds. If None, the saved config is loaded.
+    """
+    cfg = alert_config or load_alert_config()
+    if prices is None:
+        prices = fetch_prices(companies["ticker"].tolist())
+
     rows = []
     for _, company in companies.iterrows():
-        entry = prices.get(company["ticker"])
-        snap = compute_snapshot(entry["df"]) if entry else None
+        ticker = company["ticker"]
+        entry = prices.get(ticker)
+        price_pct, volume_ratio = thresholds_for(cfg, ticker)
+        snap = None
+        if entry:
+            snap = compute_snapshot(
+                entry["df"],
+                avg_window=cfg["avg_window"],
+                price_alert_pct=price_pct,
+                volume_alert_ratio=volume_ratio,
+            )
         row = {
-            "ticker": company["ticker"],
+            "ticker": ticker,
             "name": company["name"],
             "shares": company["shares"],
             "stale": entry["stale"] if entry else True,
             "has_data": snap is not None,
             "price_alert": False,
             "volume_alert": False,
+            "price_threshold": price_pct,
+            "volume_threshold": volume_ratio,
         }
         if snap:
             row.update(snap)

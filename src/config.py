@@ -20,3 +20,8 @@ ANNOUNCEMENT_LOOKBACK_DAYS = 30     # how far back each refresh looks
 ANNOUNCEMENT_REFRESH_MINUTES = 30   # skip companies fetched more recently than this
 ANNOUNCEMENT_MAX_PAGES = 5          # safety cap on pagination per company
 BSE_REQUEST_PAUSE_SEC = 0.5         # polite pause between companies
+# --- Alert settings: bounds for the user-configurable thresholds ---
+PRICE_PCT_RANGE = (0.5, 15.0)
+VOLUME_RATIO_RANGE = (1.2, 10.0)
+AVG_WINDOW_RANGE = (5, 60)
+ALERT_FILING_LOOKBACK_DAYS = 3   # how far back to look for filings near a flagged stock
