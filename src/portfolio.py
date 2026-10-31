@@ -17,7 +17,10 @@ def load_universe() -> pd.DataFrame:
     if not UNIVERSE_CSV.exists():
         raise FileNotFoundError(f"Universe file not found at {UNIVERSE_CSV}")
 
-    df = pd.read_csv(UNIVERSE_CSV)
+    df = pd.read_csv(UNIVERSE_CSV, dtype={"bse_code": str})
+    if "bse_code" not in df.columns:
+        df["bse_code"] = ""
+    df["bse_code"] = df["bse_code"].fillna("").str.strip()
 
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:

@@ -1,6 +1,9 @@
 
 import pandas as pd
 import streamlit as st
+import html
+
+from src.announcements import get_announcements, refresh_announcements
 
 from src.config import AVG_VOLUME_WINDOW, PRICE_ALERT_PCT, VOLUME_ALERT_RATIO
 from src.market_data import build_snapshot_table
@@ -13,8 +16,9 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed",
 )
-
+MAX_FEED_ITEMS = 40
 CUSTOM_CSS = """
+
 <style>
 .block-container { max-width: 480px; padding-top: 1rem; padding-bottom: 3rem; }
 .finn-header {
@@ -169,12 +173,65 @@ def render_home():
         st.cache_data.clear()
         st.rerun()
     st.caption("Also researchable: " + ", ".join(extras["name"]))
+# def render_feed():
+#     st.subheader("Intelligence Feed")
+#     st.markdown(
+#         '<div class="finn-card">Prioritised corporate announcements with AI explanations will appear here.</div>',
+#         unsafe_allow_html=True,
+#     )
+def announcement_card_html(row) -> str:
+    title = html.escape(row["title"] or "(no title)")
+    meta = html.escape(
+        f"{row['ticker']} · {row['filing_dt'] or 'date n/a'} · {row['category'] or 'Uncategorised'}"
+    )
+    url = row["filing_url"] or row["page_url"] or ""
+    link = ""
+    if url.startswith(("https://", "http://")):
+        link = f'<a href="{html.escape(url, quote=True)}" target="_blank">Original filing ↗</a>'
+    return (
+        '<div class="finn-card">'
+        f'<div style="font-size:0.75rem;color:#64748B">{meta}</div>'
+        f'<div style="font-weight:600;margin:4px 0">{title}</div>{link}</div>'
+    )
+
+
 def render_feed():
     st.subheader("Intelligence Feed")
-    st.markdown(
-        '<div class="finn-card">Prioritised corporate announcements with AI explanations will appear here.</div>',
-        unsafe_allow_html=True,
+    try:
+        portfolio = get_portfolio()
+    except (FileNotFoundError, ValueError) as err:
+        st.error(f"Could not load the company list: {err}")
+        return
+
+    choice = st.selectbox("Company", ["All portfolio"] + portfolio["name"].tolist())
+    days = st.radio(
+        "Period", [1, 7, 30], index=1, horizontal=True, format_func=lambda d: f"Last {d}d"
     )
+
+    if st.button("Fetch latest filings from BSE"):
+        with st.spinner("Contacting BSE..."):
+            summary = refresh_announcements(portfolio)
+        st.success(
+            f"{summary['new']} new filings stored from {summary['checked']} companies "
+            f"({summary['skipped_fresh']} refreshed recently)."
+        )
+        for ticker, message in summary["errors"]:
+            st.warning(f"{ticker}: {message}")
+
+    if choice == "All portfolio":
+        tickers = portfolio["ticker"].tolist()
+    else:
+        tickers = portfolio.loc[portfolio["name"] == choice, "ticker"].tolist()
+
+    df = get_announcements(tickers, days)
+    if df.empty:
+        st.info("No stored filings for this selection. Fetch from BSE, or widen the period.")
+        return
+
+    shown = min(len(df), MAX_FEED_ITEMS)
+    st.caption(f"{len(df)} filings · source: BSE · showing the latest {shown}")
+    cards = "".join(announcement_card_html(r) for _, r in df.head(MAX_FEED_ITEMS).iterrows())
+    st.markdown(cards, unsafe_allow_html=True)
 
 
 def render_research():

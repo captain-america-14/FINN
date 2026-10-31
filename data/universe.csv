@@ -1,23 +1,23 @@
-ticker,name,sector,group,shares
-RELIANCE,Reliance Industries,Energy & Conglomerate,portfolio,50
-HDFCBANK,HDFC Bank,Banking,portfolio,100
-ICICIBANK,ICICI Bank,Banking,portfolio,120
-SBIN,State Bank of India,Banking,portfolio,150
-INFY,Infosys,IT Services,portfolio,80
-TCS,Tata Consultancy Services,IT Services,portfolio,40
-WIPRO,Wipro,IT Services,portfolio,200
-TMPV,Tata Motors Passenger Vehicles,Automobiles,portfolio,150
-MARUTI,Maruti Suzuki India,Automobiles,portfolio,10
-ITC,ITC,FMCG,portfolio,300
-HINDUNILVR,Hindustan Unilever,FMCG,portfolio,60
-TATASTEEL,Tata Steel,Metals,portfolio,500
-JSWSTEEL,JSW Steel,Metals,portfolio,100
-SUNPHARMA,Sun Pharmaceutical Industries,Pharma,portfolio,70
-CIPLA,Cipla,Pharma,portfolio,80
-LT,Larsen & Toubro,Capital Goods,portfolio,35
-BHARTIARTL,Bharti Airtel,Telecom,portfolio,90
-NTPC,NTPC,Power,portfolio,250
-ASIANPAINT,Asian Paints,Consumer Durables,research,0
-TITAN,Titan Company,Consumer Durables,research,0
-BAJFINANCE,Bajaj Finance,NBFC,research,0
-DRREDDY,Dr. Reddy's Laboratories,Pharma,research,0
+ticker,name,sector,group,shares,bse_code
+RELIANCE,Reliance Industries,Energy & Conglomerate,portfolio,50,500325
+HDFCBANK,HDFC Bank,Banking,portfolio,100,500180
+ICICIBANK,ICICI Bank,Banking,portfolio,120,532174
+SBIN,State Bank of India,Banking,portfolio,150,500112
+INFY,Infosys,IT Services,portfolio,80,500209
+TCS,Tata Consultancy Services,IT Services,portfolio,40,532540
+WIPRO,Wipro,IT Services,portfolio,200,507685
+TMPV,Tata Motors Passenger Vehicles,Automobiles,portfolio,150,500570
+MARUTI,Maruti Suzuki India,Automobiles,portfolio,10,532500
+ITC,ITC,FMCG,portfolio,300,500875
+HINDUNILVR,Hindustan Unilever,FMCG,portfolio,60,500696
+TATASTEEL,Tata Steel,Metals,portfolio,500,500470
+JSWSTEEL,JSW Steel,Metals,portfolio,100,500228
+SUNPHARMA,Sun Pharmaceutical Industries,Pharma,portfolio,70,524715
+CIPLA,Cipla,Pharma,portfolio,80,500087
+LT,Larsen & Toubro,Capital Goods,portfolio,35,500510
+BHARTIARTL,Bharti Airtel,Telecom,portfolio,90,532454
+NTPC,NTPC,Power,portfolio,250,532555
+ASIANPAINT,Asian Paints,Consumer Durables,research,0,500820
+TITAN,Titan Company,Consumer Durables,research,0,500114
+BAJFINANCE,Bajaj Finance,NBFC,research,0,500034
+DRREDDY,Dr. Reddy's Laboratories,Pharma,research,0,500124
