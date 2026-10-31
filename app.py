@@ -1,4 +1,10 @@
+
+import pandas as pd
 import streamlit as st
+
+from src.config import AVG_VOLUME_WINDOW, PRICE_ALERT_PCT, VOLUME_ALERT_RATIO
+from src.market_data import build_snapshot_table
+from src.metrics import portfolio_totals
 from src.portfolio import get_portfolio, get_research_extras
 
 st.set_page_config(
@@ -46,9 +52,40 @@ def render_header():
 
 
 # 
-@st.cache_data
-def load_portfolio():
-    return get_portfolio()
+# @st.cache_data
+# def load_portfolio():
+#     return get_portfolio()
+
+
+# @st.cache_data
+# def load_research_extras():
+#     return get_research_extras()
+
+
+# def render_home():
+#     st.subheader("Home")
+#     try:
+#         portfolio = load_portfolio()
+#         extras = load_research_extras()
+#     except (FileNotFoundError, ValueError) as err:
+#         st.error(f"Could not load the company list: {err}")
+#         return
+
+#     st.markdown('<span class="finn-tag">DEMO HOLDINGS</span>', unsafe_allow_html=True)
+#     col1, col2 = st.columns(2)
+#     col1.metric("Portfolio stocks", len(portfolio))
+#     col2.metric("Sectors", portfolio["sector"].nunique())
+
+#     st.dataframe(
+#         portfolio[["ticker", "name", "sector", "shares"]],
+#         hide_index=True,
+#         width="stretch",
+#     )
+#     st.caption("Also researchable: " + ", ".join(extras["name"]))
+
+@st.cache_data(ttl=900, show_spinner="Fetching market data...")
+def load_snapshot():
+    return build_snapshot_table(get_portfolio())
 
 
 @st.cache_data
@@ -56,28 +93,82 @@ def load_research_extras():
     return get_research_extras()
 
 
+def format_flags(row):
+    flags = []
+    if row["price_alert"]:
+        flags.append("⚡")
+    if row["volume_alert"]:
+        flags.append("📊")
+    if row["stale"]:
+        flags.append("🕒")
+    return " ".join(flags)
+
+
 def render_home():
     st.subheader("Home")
     try:
-        portfolio = load_portfolio()
+        table = load_snapshot()
         extras = load_research_extras()
     except (FileNotFoundError, ValueError) as err:
         st.error(f"Could not load the company list: {err}")
         return
 
-    st.markdown('<span class="finn-tag">DEMO HOLDINGS</span>', unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    col1.metric("Portfolio stocks", len(portfolio))
-    col2.metric("Sectors", portfolio["sector"].nunique())
+    st.markdown(
+        '<span class="finn-tag">DEMO HOLDINGS · MARKET PRICES</span>',
+        unsafe_allow_html=True,
+    )
 
+    ok = table[table["has_data"]]
+    if ok.empty:
+        st.error("No market data available right now. Check your connection and retry.")
+        if st.button("Retry"):
+            st.cache_data.clear()
+            st.rerun()
+        return
+
+    totals = portfolio_totals(table)
+    col1, col2 = st.columns(2)
+    col1.metric(
+        "Demo portfolio value",
+        f"₹{totals['value']:,.0f}",
+        f"{totals['day_change_pct']:+.2f}% last session",
+    )
+    col2.metric("Alerts", int((ok["price_alert"] | ok["volume_alert"]).sum()))
+
+    missing = table.loc[~table["has_data"], "ticker"].tolist()
+    if missing:
+        st.warning("No data for: " + ", ".join(missing))
+    if ok["stale"].any():
+        st.info("Some prices come from a saved copy because live data was unavailable.")
+
+    display = pd.DataFrame(
+        {
+            "Ticker": ok["ticker"],
+            "Close ₹": ok["close"],
+            "Day %": ok["change_pct"],
+            "Vol ×": ok["volume_ratio"],
+            "Flags": ok.apply(format_flags, axis=1),
+        }
+    )
     st.dataframe(
-        portfolio[["ticker", "name", "sector", "shares"]],
+        display,
         hide_index=True,
         width="stretch",
+        column_config={
+            "Close ₹": st.column_config.NumberColumn(format="%.2f"),
+            "Day %": st.column_config.NumberColumn(format="%+.2f"),
+            "Vol ×": st.column_config.NumberColumn(format="%.1f"),
+        },
     )
+    st.caption(
+        f"As of {ok['as_of'].max()} close · daily data via Yahoo Finance. "
+        f"⚡ move ≥ {PRICE_ALERT_PCT:g}% · 📊 volume ≥ {VOLUME_ALERT_RATIO:g}× "
+        f"{AVG_VOLUME_WINDOW}-day average · 🕒 saved copy"
+    )
+    if st.button("Refresh prices"):
+        st.cache_data.clear()
+        st.rerun()
     st.caption("Also researchable: " + ", ".join(extras["name"]))
-
-
 def render_feed():
     st.subheader("Intelligence Feed")
     st.markdown(
