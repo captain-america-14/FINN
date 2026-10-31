@@ -1,4 +1,5 @@
 import streamlit as st
+from src.portfolio import get_portfolio, get_research_extras
 
 st.set_page_config(
     page_title="FINN - Financial Investment Agent",
@@ -44,16 +45,37 @@ def render_header():
     )
 
 
+# 
+@st.cache_data
+def load_portfolio():
+    return get_portfolio()
+
+
+@st.cache_data
+def load_research_extras():
+    return get_research_extras()
+
+
 def render_home():
     st.subheader("Home")
-    st.markdown('<span class="finn-tag">PLACEHOLDER</span>', unsafe_allow_html=True)
+    try:
+        portfolio = load_portfolio()
+        extras = load_research_extras()
+    except (FileNotFoundError, ValueError) as err:
+        st.error(f"Could not load the company list: {err}")
+        return
+
+    st.markdown('<span class="finn-tag">DEMO HOLDINGS</span>', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
-    col1.metric("Portfolio stocks", "18")
-    col2.metric("High-priority alerts", "-")
-    st.markdown(
-        '<div class="finn-card">Portfolio overview, key developments and quick research will appear here.</div>',
-        unsafe_allow_html=True,
+    col1.metric("Portfolio stocks", len(portfolio))
+    col2.metric("Sectors", portfolio["sector"].nunique())
+
+    st.dataframe(
+        portfolio[["ticker", "name", "sector", "shares"]],
+        hide_index=True,
+        width="stretch",
     )
+    st.caption("Also researchable: " + ", ".join(extras["name"]))
 
 
 def render_feed():
