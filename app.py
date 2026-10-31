@@ -1,10 +1,10 @@
+import html
 
 import pandas as pd
 import streamlit as st
-import html
 
 from src.announcements import get_announcements, refresh_announcements
-
+from src.classifier import classify_pending
 from src.config import AVG_VOLUME_WINDOW, PRICE_ALERT_PCT, VOLUME_ALERT_RATIO
 from src.market_data import build_snapshot_table
 from src.metrics import portfolio_totals
@@ -16,9 +16,12 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed",
 )
-MAX_FEED_ITEMS = 40
-CUSTOM_CSS = """
 
+MAX_FEED_ITEMS = 40
+MAX_HOME_DEVELOPMENTS = 5
+PRIORITY_OPTIONS = ["High", "Medium", "Low"]
+
+CUSTOM_CSS = """
 <style>
 .block-container { max-width: 480px; padding-top: 1rem; padding-bottom: 3rem; }
 .finn-header {
@@ -35,6 +38,13 @@ CUSTOM_CSS = """
     display: inline-block; font-size: 0.7rem; font-weight: 600;
     padding: 2px 8px; border-radius: 999px; background: #FEF3C7; color: #92400E;
 }
+.finn-badge {
+    display: inline-block; font-size: 0.68rem; font-weight: 700;
+    padding: 2px 8px; border-radius: 999px; margin-right: 6px;
+}
+.finn-high { background: #FEE2E2; color: #991B1B; }
+.finn-medium { background: #FEF3C7; color: #92400E; }
+.finn-low { background: #E2E8F0; color: #475569; }
 </style>
 """
 
@@ -55,37 +65,33 @@ def render_header():
     )
 
 
-# 
-# @st.cache_data
-# def load_portfolio():
-#     return get_portfolio()
+# ---------- Shared pieces ----------
 
 
-# @st.cache_data
-# def load_research_extras():
-#     return get_research_extras()
+def announcement_card_html(row) -> str:
+    title = html.escape(row["title"] or "(no title)")
+    meta = html.escape(f"{row['ticker']} · {row['filing_dt'] or 'date n/a'}")
+    category = html.escape(row.get("fin_category") or "Unclassified")
+    reason = html.escape(row.get("reason") or "")
 
+    priority = row.get("priority") or ""
+    badge = ""
+    if priority in PRIORITY_OPTIONS:
+        badge = f'<span class="finn-badge finn-{priority.lower()}">{priority.upper()}</span>'
 
-# def render_home():
-#     st.subheader("Home")
-#     try:
-#         portfolio = load_portfolio()
-#         extras = load_research_extras()
-#     except (FileNotFoundError, ValueError) as err:
-#         st.error(f"Could not load the company list: {err}")
-#         return
+    url = row["filing_url"] or row["page_url"] or ""
+    link = ""
+    if url.startswith(("https://", "http://")):
+        link = f'<a href="{html.escape(url, quote=True)}" target="_blank">Original filing ↗</a>'
 
-#     st.markdown('<span class="finn-tag">DEMO HOLDINGS</span>', unsafe_allow_html=True)
-#     col1, col2 = st.columns(2)
-#     col1.metric("Portfolio stocks", len(portfolio))
-#     col2.metric("Sectors", portfolio["sector"].nunique())
+    return (
+        '<div class="finn-card">'
+        f'<div>{badge}<span style="font-size:0.75rem;color:#64748B">{meta}</span></div>'
+        f'<div style="font-weight:600;margin:4px 0">{title}</div>'
+        f'<div style="font-size:0.8rem;color:#475569;margin-bottom:4px">{category} · {reason}</div>'
+        f"{link}</div>"
+    )
 
-#     st.dataframe(
-#         portfolio[["ticker", "name", "sector", "shares"]],
-#         hide_index=True,
-#         width="stretch",
-#     )
-#     st.caption("Also researchable: " + ", ".join(extras["name"]))
 
 @st.cache_data(ttl=900, show_spinner="Fetching market data...")
 def load_snapshot():
@@ -106,6 +112,27 @@ def format_flags(row):
     if row["stale"]:
         flags.append("🕒")
     return " ".join(flags)
+
+
+# ---------- Screens ----------
+
+
+def render_top_developments():
+    try:
+        portfolio = get_portfolio()
+        df = get_announcements(portfolio["ticker"].tolist(), days=7, priorities=["High"])
+    except Exception as err:
+        st.caption(f"Filings unavailable: {err}")
+        return
+
+    st.markdown("**High-priority developments · last 7 days**")
+    if df.empty:
+        st.caption("None stored yet. Open the Feed tab and fetch the latest filings.")
+        return
+    cards = "".join(
+        announcement_card_html(r) for _, r in df.head(MAX_HOME_DEVELOPMENTS).iterrows()
+    )
+    st.markdown(cards, unsafe_allow_html=True)
 
 
 def render_home():
@@ -145,6 +172,8 @@ def render_home():
     if ok["stale"].any():
         st.info("Some prices come from a saved copy because live data was unavailable.")
 
+    render_top_developments()
+
     display = pd.DataFrame(
         {
             "Ticker": ok["ticker"],
@@ -173,26 +202,6 @@ def render_home():
         st.cache_data.clear()
         st.rerun()
     st.caption("Also researchable: " + ", ".join(extras["name"]))
-# def render_feed():
-#     st.subheader("Intelligence Feed")
-#     st.markdown(
-#         '<div class="finn-card">Prioritised corporate announcements with AI explanations will appear here.</div>',
-#         unsafe_allow_html=True,
-#     )
-def announcement_card_html(row) -> str:
-    title = html.escape(row["title"] or "(no title)")
-    meta = html.escape(
-        f"{row['ticker']} · {row['filing_dt'] or 'date n/a'} · {row['category'] or 'Uncategorised'}"
-    )
-    url = row["filing_url"] or row["page_url"] or ""
-    link = ""
-    if url.startswith(("https://", "http://")):
-        link = f'<a href="{html.escape(url, quote=True)}" target="_blank">Original filing ↗</a>'
-    return (
-        '<div class="finn-card">'
-        f'<div style="font-size:0.75rem;color:#64748B">{meta}</div>'
-        f'<div style="font-weight:600;margin:4px 0">{title}</div>{link}</div>'
-    )
 
 
 def render_feed():
@@ -207,10 +216,12 @@ def render_feed():
     days = st.radio(
         "Period", [1, 7, 30], index=1, horizontal=True, format_func=lambda d: f"Last {d}d"
     )
+    priorities = st.multiselect("Priority", PRIORITY_OPTIONS, default=["High", "Medium"])
 
     if st.button("Fetch latest filings from BSE"):
-        with st.spinner("Contacting BSE..."):
+        with st.spinner("Contacting BSE and classifying..."):
             summary = refresh_announcements(portfolio)
+            classify_pending()
         st.success(
             f"{summary['new']} new filings stored from {summary['checked']} companies "
             f"({summary['skipped_fresh']} refreshed recently)."
@@ -223,13 +234,28 @@ def render_feed():
     else:
         tickers = portfolio.loc[portfolio["name"] == choice, "ticker"].tolist()
 
-    df = get_announcements(tickers, days)
-    if df.empty:
+    everything = get_announcements(tickers, days)
+    if everything.empty:
         st.info("No stored filings for this selection. Fetch from BSE, or widen the period.")
         return
 
+    counts = everything["priority"].value_counts()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("High", int(counts.get("High", 0)))
+    c2.metric("Medium", int(counts.get("Medium", 0)))
+    c3.metric("Low", int(counts.get("Low", 0)))
+
+    df = everything[everything["priority"].isin(priorities)] if priorities else everything
+    hidden = len(everything) - len(df)
+    if df.empty:
+        st.info("Nothing matches the selected priorities. Add Low to see routine filings.")
+        return
+
     shown = min(len(df), MAX_FEED_ITEMS)
-    st.caption(f"{len(df)} filings · source: BSE · showing the latest {shown}")
+    st.caption(
+        f"Showing {shown} of {len(df)} filings ({hidden} hidden by the priority filter) · "
+        "source: BSE · sorted by priority, then newest"
+    )
     cards = "".join(announcement_card_html(r) for _, r in df.head(MAX_FEED_ITEMS).iterrows())
     st.markdown(cards, unsafe_allow_html=True)
 
@@ -251,6 +277,10 @@ def render_ask():
 def main():
     inject_css()
     render_header()
+    try:
+        classify_pending()
+    except Exception as err:
+        st.warning(f"Classification skipped: {err}")
     tab_home, tab_feed, tab_research, tab_ask = st.tabs(
         ["Home", "Feed", "Research", "Ask FINN"]
     )

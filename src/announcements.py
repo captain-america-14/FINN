@@ -119,10 +119,10 @@ def refresh_announcements(
     return summary
 
 
-def get_announcements(tickers=None, days: int = 7) -> pd.DataFrame:
-    """Read stored announcements for the last `days` days."""
+def get_announcements(tickers=None, days: int = 7, priorities=None, order_by: str = "priority") -> pd.DataFrame:
+    """Read stored, classified announcements for the last `days` days."""
     since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
-    return db.read_announcements(tickers, since)
+    return db.read_announcements(tickers, since, priorities, order_by)
 
 
 if __name__ == "__main__":
