@@ -4,3 +4,5 @@ numpy
 python-dotenv
 yfinance
 bse
+requests
+beautifulsoup4

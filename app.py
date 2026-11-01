@@ -15,7 +15,8 @@ from src.classifier import classify_pending, short_title
 from src.config import ALERT_FILING_LOOKBACK_DAYS
 from src.market_data import build_snapshot_table, fetch_prices
 from src.metrics import portfolio_totals
-from src.portfolio import get_portfolio, get_research_extras
+from src.portfolio import get_portfolio, get_research_extras, load_universe
+from src.results import available_bases, ebitda_label, get_growth_table, refresh_results
 
 st.set_page_config(
     page_title="FINN - Financial Investment Agent",
@@ -386,12 +387,124 @@ def render_feed():
     st.markdown(cards, unsafe_allow_html=True)
 
 
+def format_crore(value) -> str:
+    if value is None or pd.isna(value):
+        return "n/a"
+    return f"{value:,.0f}" if abs(value) >= 100 else f"{value:,.1f}"
+
+
+def format_growth(value) -> str:
+    # n/m = not meaningful (no prior figure, or the prior figure was zero or negative)
+    return "n/m" if value is None or pd.isna(value) else f"{value:+.1f}%"
+
+
 def render_research():
     st.subheader("Company Research")
+    try:
+        universe = load_universe()
+    except (FileNotFoundError, ValueError) as err:
+        st.error(f"Could not load the company list: {err}")
+        return
+
+    name_to_ticker = dict(zip(universe["name"], universe["ticker"]))
+    name = st.selectbox("Company", list(name_to_ticker))
+    ticker = name_to_ticker[name]
+
+    if st.button("Fetch quarterly results from Screener"):
+        with st.spinner("Contacting Screener.in..."):
+            summary = refresh_results(universe[universe["ticker"] == ticker], force=True)
+        for failed_ticker, message in summary["errors"]:
+            st.warning(f"{failed_ticker}: {message}")
+        if not summary["errors"]:
+            st.success(f"Stored {summary['stored_quarters']} quarterly records.")
+
+    bases = available_bases(ticker)
+    if not bases:
+        st.info("No results stored for this company yet. Press the fetch button above.")
+        return
+    if len(bases) > 1:
+        basis = st.radio("Statements", bases, horizontal=True, format_func=str.capitalize)
+    else:
+        basis = bases[0]
+        st.caption(f"Only {basis} statements are available for this company.")
+
+    table = get_growth_table(ticker, basis)
+    latest = table.iloc[-1]
+    is_financial = bool(latest["is_financial"])
+    items = [
+        ("Revenue", "revenue"),
+        (ebitda_label(is_financial), "ebitda"),
+        ("PBT", "pbt"),
+        ("PAT", "pat"),
+    ]
+
     st.markdown(
-        '<div class="finn-card">Business, financials, trends and bull/bear analysis will appear here.</div>',
-        unsafe_allow_html=True,
+        f"**{name}** · {basis.capitalize()} · ₹ crore · latest quarter **{latest['period']}**"
     )
+    cols = st.columns(2)
+    for i, (label, key) in enumerate(items):
+        yoy = latest[f"{key}_yoy"]
+        delta = None if pd.isna(yoy) else f"{yoy:+.1f}% YoY"
+        cols[i % 2].metric(label, format_crore(latest[key]), delta)
+
+    growth = pd.DataFrame(
+        {
+            "Metric": [label for label, _ in items],
+            "Latest ₹ cr": [format_crore(latest[key]) for _, key in items],
+            "QoQ": [format_growth(latest[f"{key}_qoq"]) for _, key in items],
+            "YoY": [format_growth(latest[f"{key}_yoy"]) for _, key in items],
+        }
+    )
+    st.dataframe(growth, hide_index=True, width="stretch")
+
+    margin_bits = []
+    if pd.notna(latest["ebitda_margin_pct"]):
+        text = f"{'Financing' if is_financial else 'EBITDA'} margin {latest['ebitda_margin_pct']:.1f}%"
+        if pd.notna(latest["ebitda_margin_yoy_pp"]):
+            text += f" ({latest['ebitda_margin_yoy_pp']:+.1f} pp YoY)"
+        margin_bits.append(text)
+    if pd.notna(latest["pat_margin_pct"]):
+        margin_bits.append(f"PAT margin {latest['pat_margin_pct']:.1f}%")
+    if margin_bits:
+        st.caption(" · ".join(margin_bits))
+
+    st.markdown("**Last 6 quarters (₹ crore)**")
+    recent = table.tail(6)
+    trend = pd.DataFrame(
+        {label: [format_crore(v) for v in recent[key]] for label, key in items},
+        index=recent["period"],
+    ).T
+    trend.columns.name = None
+    st.dataframe(trend, width="stretch")
+
+    st.caption(
+        f"Source: Screener.in, compiled from company filings · fetched {latest['fetched_at']} · "
+        f"[source page]({latest['source_url']})"
+    )
+    if is_financial:
+        st.caption(
+            "Banks and NBFCs report 'financing profit', which is not comparable to EBITDA."
+        )
+    else:
+        st.caption(
+            "EBITDA = Screener's 'Operating Profit' (sales minus operating expenses, before other income). "
+            "PAT = Screener's 'Net Profit'; check the filing for minority-interest treatment."
+        )
+    st.caption(
+        "Consolidated = parent plus subsidiaries; standalone = parent only. Compare like with like. "
+        "n/m = not meaningful (no prior figure, or the prior figure was zero or negative)."
+    )
+
+    filings = get_announcements([ticker], days=120)
+    results_filings = filings[filings["rule_id"] == "results"].head(2)
+    st.markdown("**Original results filings (BSE)**")
+    if results_filings.empty:
+        st.caption("None stored. Fetch filings in the Feed tab to see the original documents here.")
+    for _, f in results_filings.iterrows():
+        url = f["filing_url"] or f["page_url"]
+        title = short_title(f["title"]).replace("[", "(").replace("]", ")")
+        if url.startswith(("https://", "http://")):
+            st.markdown(f"- [{title}]({url}) · {f['filing_dt'][:10]}")
 
 
 def render_ask():

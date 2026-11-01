@@ -25,3 +25,12 @@ PRICE_PCT_RANGE = (0.5, 15.0)
 VOLUME_RATIO_RANGE = (1.2, 10.0)
 AVG_WINDOW_RANGE = (5, 60)
 ALERT_FILING_LOOKBACK_DAYS = 3   # how far back to look for filings near a flagged stock
+# --- Quarterly results (Screener.in) ---
+SCREENER_BASE_URL = "https://www.screener.in"
+SCREENER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+SCREENER_TIMEOUT_SEC = 20
+SCREENER_PAUSE_SEC = 1.5      # polite gap between requests
+RESULTS_REFRESH_HOURS = 12    # don't refetch a company more often than this
