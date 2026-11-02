@@ -56,4 +56,16 @@ DOCS_TRANSCRIPTS = 8           # latest N earnings-call transcripts per company
 DOCS_MAX_BYTES = 80_000_000    # refuse downloads larger than this
 DOCS_PAUSE_SEC = 1.0           # polite gap between downloads
 DOCS_SOURCE_PREFERENCE = ("bse", "nse")
+# --- RAG: chunking, embeddings, search ---
+RAG_DIR = DATA_DIR / "index"
+EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+EMBED_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+EMBED_BATCH_SIZE = 32
+CHUNKER_VERSION = "2026.11.1"
+CHUNK_WORDS = 200
+CHUNK_OVERLAP_WORDS = 40
+MIN_CHUNK_CHARS = 250
+MIN_ALPHA_RATIO = 0.45          # drop chunks that are mostly numbers (table dumps)
+RAG_MAX_PAGES = 700
+RAG_TOP_K = 6
 

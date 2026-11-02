@@ -6,3 +6,8 @@ yfinance
 bse
 requests
 beautifulsoup4
+anthropic
+pypdf
+google-genai
+sentence-transformers
+faiss-cpu

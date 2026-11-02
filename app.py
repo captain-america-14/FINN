@@ -19,6 +19,7 @@ from src.portfolio import get_portfolio, get_research_extras, load_universe
 from src.results import available_bases, ebitda_label, get_growth_table, refresh_results
 from src.summarizer import SUMMARY_BATCH_LIMIT, is_configured, summarise_pending, summary_view
 from src.documents import collect_documents, list_documents
+from src.rag import index_status, ingest_company, search_documents
 st.set_page_config(
     page_title="FINN - Financial Investment Agent",
     page_icon="📈",
@@ -624,11 +625,88 @@ def render_research():
         if url.startswith(("https://", "http://")):
             st.markdown(f"- [{title}]({url}) · {f['filing_dt'][:10]}")
 
-
+def passage_card_html(result: dict) -> str:
+    citation = html.escape(result["citation"])
+    text = result["text"]
+    snippet = html.escape(text[:450]) + ("…" if len(text) > 450 else "")
+    link = ""
+    if result["url"].startswith(("https://", "http://")):
+        link = f'<a href="{html.escape(result["url"], quote=True)}" target="_blank">Open the original document ↗</a>'
+    return (
+        '<div class="finn-card">'
+        f'<div style="font-size:0.75rem;color:#64748B">{citation} · relevance {result["score"]:.2f}</div>'
+        f'<div style="font-size:0.88rem;margin:4px 0">{snippet}</div>'
+        '<details><summary style="cursor:pointer;font-size:0.8rem">Show the full passage</summary>'
+        f'<div style="font-size:0.85rem;margin-top:4px">{html.escape(text)}</div></details>'
+        f"{link}</div>"
+    )
 def render_ask():
     st.subheader("Ask FINN")
-    st.text_input("Ask a question about a company", placeholder="e.g. What did Infosys guide for FY26?")
-    st.caption("Grounded answers with source citations will appear here.")
+    try:
+        universe = load_universe()
+    except (FileNotFoundError, ValueError) as err:
+        st.error(f"Could not load the company list: {err}")
+        return
+
+    name_to_ticker = dict(zip(universe["name"], universe["ticker"]))
+    name = st.selectbox("Company", list(name_to_ticker), key="ask_company")
+    ticker = name_to_ticker[name]
+
+    status = index_status(ticker)
+    if not status["indexed"]:
+        st.info(
+            "No documents are indexed for this company yet. Collect its documents in the Research tab, "
+            "then build the index below."
+        )
+    if st.button("Build or update the document index"):
+        with st.spinner(
+            "Reading PDFs and building the index. The first run downloads a small embedding model "
+            "and can take several minutes..."
+        ):
+            try:
+                result = ingest_company(ticker)
+            except Exception as err:
+                st.error(f"Indexing failed: {err}")
+            else:
+                st.success(
+                    f"{result['ingested']} documents read, {result['skipped']} unchanged, "
+                    f"{result['embedded']} new passages embedded."
+                )
+                for problem in result["problems"]:
+                    st.warning(problem)
+        status = index_status(ticker)
+
+    if not status["indexed"]:
+        return
+
+    st.caption(f"Index: {status['documents']} documents · {status['chunks']} passages")
+    scope = st.radio(
+        "Search in", ["All documents", "Annual reports", "Call transcripts"], horizontal=True
+    )
+    doc_types = {
+        "All documents": None,
+        "Annual reports": ["annual_report"],
+        "Call transcripts": ["transcript"],
+    }[scope]
+    question = st.text_input(
+        "Ask a question about this company",
+        placeholder="e.g. What did management say about margins?",
+        key="ask_question",
+    )
+    if not question.strip():
+        st.caption(
+            "Retrieval preview: FINN finds the most relevant passages in the company's own annual reports "
+            "and call transcripts. AI-written answers built on these passages come next."
+        )
+        return
+
+    with st.spinner("Searching the documents..."):
+        results = search_documents(ticker, question, doc_types=doc_types)
+    if not results:
+        st.info("No passages found. Try different wording, or search all documents.")
+        return
+    st.markdown("".join(passage_card_html(r) for r in results), unsafe_allow_html=True)
+    st.caption("Page numbers are PDF viewer pages, which can differ from the numbers printed on the page.")
 
 
 def main():
