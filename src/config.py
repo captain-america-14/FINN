@@ -49,4 +49,11 @@ FILING_MAX_PAGES = 10
 FILING_MAX_CHARS = 12000
 FILING_MAX_BYTES = 30_000_000
 LLM_MIN_SECONDS_BETWEEN_CALLS = 10  
+# --- Primary-source documents ---
+DOCS_DIR = DATA_DIR / "docs"
+DOCS_ANNUAL_REPORTS = 3        # latest N annual reports per company
+DOCS_TRANSCRIPTS = 8           # latest N earnings-call transcripts per company
+DOCS_MAX_BYTES = 80_000_000    # refuse downloads larger than this
+DOCS_PAUSE_SEC = 1.0           # polite gap between downloads
+DOCS_SOURCE_PREFERENCE = ("bse", "nse")
 

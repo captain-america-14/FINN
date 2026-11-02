@@ -7,3 +7,4 @@ data/cache/
 *.sqlite
 *.db
 .DS_Store
+data/docs/

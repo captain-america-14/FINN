@@ -18,7 +18,7 @@ from src.metrics import portfolio_totals
 from src.portfolio import get_portfolio, get_research_extras, load_universe
 from src.results import available_bases, ebitda_label, get_growth_table, refresh_results
 from src.summarizer import SUMMARY_BATCH_LIMIT, is_configured, summarise_pending, summary_view
-
+from src.documents import collect_documents, list_documents
 st.set_page_config(
     page_title="FINN - Financial Investment Agent",
     page_icon="📈",
@@ -439,7 +439,7 @@ def render_feed():
 
     pending = df[(df["has_summary"] == 0) & (df["priority"].isin(["High", "Medium"]))]
     if not is_configured():
-        st.caption("AI summaries are off. Add ANTHROPIC_API_KEY to the .env file and restart the app.")
+                st.caption("AI summaries are off. Add GEMINI_API_KEY to the .env file and restart the app.")
     elif not pending.empty:
         batch = min(len(pending), SUMMARY_BATCH_LIMIT)
         if st.button(f"Generate AI summaries for {batch} filings"):
@@ -466,7 +466,55 @@ def format_growth(value) -> str:
     # n/m = not meaningful (no prior figure, or the prior figure was zero or negative)
     return "n/m" if value is None or pd.isna(value) else f"{value:+.1f}%"
 
+def render_documents(ticker: str, name: str):
+    with st.expander("📄 Primary-source documents (annual reports and call transcripts)"):
+        st.caption(
+            "Collected from the company's own filings via Screener.in's document links. "
+            "Only these primary sources will be used to answer research questions; "
+            "Screener's AI summaries and notes are ignored."
+        )
+        if st.button(f"Collect documents for {name}"):
+            with st.spinner("Listing and downloading documents. This can take a minute or two..."):
+                result = collect_documents(ticker)
+            if result["error"]:
+                st.error(result["error"])
+            else:
+                st.success(
+                    f"{result['downloaded']} downloaded, {result['already_had']} already stored."
+                )
+            for message in result["problems"]:
+                st.warning(message)
 
+        docs = list_documents(ticker)
+        if docs.empty:
+            st.info("No documents collected yet. Press the button above.")
+            return
+
+        labels = {"annual_report": "Annual report", "transcript": "Call transcript"}
+        view = pd.DataFrame(
+            {
+                "Type": docs["doc_type"].map(labels),
+                "Period": docs["period_label"],
+                "Status": docs["status"],
+                "Pages": pd.to_numeric(docs["pages"], errors="coerce").astype("Int64"),
+            }
+        )
+        st.dataframe(view, hide_index=True, width="stretch")
+        st.caption(
+            "ok = readable text · scanned = image-only PDF (would need OCR) · "
+            "failed or skipped = see the note below."
+        )
+        for _, d in docs.iterrows():
+            if d["status"] in ("failed", "skipped"):
+                st.caption(f"{d['period_label']} ({d['doc_type']}): {d['status_detail']}")
+
+        links = [
+            f"- [{labels.get(d['doc_type'], d['doc_type'])} · {d['period_label']}]({d['url']})"
+            for _, d in docs.iterrows()
+            if str(d["url"]).startswith(("https://", "http://"))
+        ]
+        if links:
+            st.markdown("**Original documents**\n" + "\n".join(links))
 def render_research():
     st.subheader("Company Research")
     try:
@@ -478,6 +526,7 @@ def render_research():
     name_to_ticker = dict(zip(universe["name"], universe["ticker"]))
     name = st.selectbox("Company", list(name_to_ticker))
     ticker = name_to_ticker[name]
+    render_documents(ticker, name)
 
     if st.button("Fetch quarterly results from Screener"):
         with st.spinner("Contacting Screener.in..."):
