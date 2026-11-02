@@ -34,3 +34,19 @@ SCREENER_USER_AGENT = (
 SCREENER_TIMEOUT_SEC = 20
 SCREENER_PAUSE_SEC = 1.5      # polite gap between requests
 RESULTS_REFRESH_HOURS = 12    # don't refetch a company more often than this
+# --- LLM summaries ---
+LLM_MODEL = "gemini-2.5-flash-lite"
+LLM_MAX_OUTPUT_TOKENS = 1500
+LLM_TIMEOUT_SEC = 60
+LLM_PRICE_PER_M_INPUT = 0.0    # USD per million tokens, prompts up to 100K
+LLM_PRICE_PER_M_OUTPUT = 0.0
+SUMMARY_BATCH_LIMIT = 10        # max filings summarised per button press (cost guard)
+SUMMARY_PROMPT_VERSION = "2026.11.1"
+
+# --- Reading filing PDFs ---
+FILING_ALLOWED_HOSTS = ("www.bseindia.com", "bseindia.com")
+FILING_MAX_PAGES = 10
+FILING_MAX_CHARS = 12000
+FILING_MAX_BYTES = 30_000_000
+LLM_MIN_SECONDS_BETWEEN_CALLS = 10  
+

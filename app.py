@@ -17,6 +17,7 @@ from src.market_data import build_snapshot_table, fetch_prices
 from src.metrics import portfolio_totals
 from src.portfolio import get_portfolio, get_research_extras, load_universe
 from src.results import available_bases, ebitda_label, get_growth_table, refresh_results
+from src.summarizer import SUMMARY_BATCH_LIMIT, is_configured, summarise_pending, summary_view
 
 st.set_page_config(
     page_title="FINN - Financial Investment Agent",
@@ -80,13 +81,44 @@ def render_header():
 def announcement_card_html(row) -> str:
     title = html.escape(row["title"] or "(no title)")
     meta = html.escape(f"{row['ticker']} · {row['filing_dt'] or 'date n/a'}")
-    category = html.escape(row.get("fin_category") or "Unclassified")
     reason = html.escape(row.get("reason") or "")
+
+    # For filings the rules could not judge, show the category the AI summary found
+    category_text = row.get("fin_category") or "Unclassified"
+    if row.get("has_summary") and row.get("needs_llm") and row.get("llm_category"):
+        category_text = row["llm_category"]
+        reason = "Classified from the filing content"
+    category = html.escape(category_text)
 
     priority = row.get("priority") or ""
     badge = ""
     if priority in PRIORITY_OPTIONS:
         badge = f'<span class="finn-badge finn-{priority.lower()}">{priority.upper()}</span>'
+
+    summary_html = ""
+    if row.get("has_summary"):
+        view = summary_view(row)
+        basis = "filing text" if view["basis"] == "filing_text" else "headline only"
+        check = "evidence checked ✓" if view["verified"] else "evidence not fully verified ⚠"
+        steps = "".join(f"<li>{html.escape(s)}</li>" for s in view["investigate_next"])
+        background = ""
+        if view["appointee_background"]:
+            background = (
+                '<div style="margin-top:4px"><b>Appointee background (as stated in the filing):</b> '
+                f"{html.escape(view['appointee_background'])}</div>"
+            )
+        summary_html = (
+            '<details style="margin:6px 0">'
+            '<summary style="cursor:pointer;font-size:0.8rem;font-weight:600">'
+            f"AI summary · {basis} · {check}</summary>"
+            '<div style="font-size:0.85rem;margin-top:4px">'
+            f"<b>What happened:</b> {html.escape(view['what_happened'])}</div>"
+            '<div style="font-size:0.85rem;margin-top:4px">'
+            f"<b>Why it matters:</b> {html.escape(view['why_it_matters'])}</div>"
+            '<div style="font-size:0.85rem;margin-top:4px"><b>Investigate next:</b></div>'
+            f'<ul style="font-size:0.85rem;margin:2px 0 0 18px;padding:0">{steps}</ul>'
+            f"{background}</details>"
+        )
 
     url = row["filing_url"] or row["page_url"] or ""
     link = ""
@@ -98,7 +130,7 @@ def announcement_card_html(row) -> str:
         f'<div>{badge}<span style="font-size:0.75rem;color:#64748B">{meta}</span></div>'
         f'<div style="font-weight:600;margin:4px 0">{title}</div>'
         f'<div style="font-size:0.8rem;color:#475569;margin-bottom:4px">{category} · {reason}</div>'
-        f"{link}</div>"
+        f"{summary_html}{link}</div>"
     )
 
 
@@ -331,6 +363,23 @@ def render_home():
     st.caption("Also researchable: " + ", ".join(extras["name"]))
 
 
+# def render_feed():
+#     st.subheader("Intelligence Feed")
+#     try:
+#         portfolio = get_portfolio()
+#     except (FileNotFoundError, ValueError) as err:
+#         st.error(f"Could not load the company list: {err}")
+#         return
+
+#     choice = st.selectbox("Company", ["All portfolio"] + portfolio["name"].tolist())
+#     days = st.radio(
+#         "Period", [1, 7, 30], index=1, horizontal=True, format_func=lambda d: f"Last {d}d"
+#     )
+#     priorities = st.multiselect("Priority", PRIORITY_OPTIONS, default=["High", "Medium"])
+
+#     if st.button("Fetch latest filings from BSE"):
+#         with st.spinner("Contacting BSE and classifying..."):
+    #        
 def render_feed():
     st.subheader("Intelligence Feed")
     try:
@@ -356,6 +405,16 @@ def render_feed():
         for ticker, message in summary["errors"]:
             st.warning(f"{ticker}: {message}")
 
+    report = st.session_state.pop("summary_report", None)
+    if report:
+        if report["done"]:
+            st.success(
+                f"Summarised {report['done']} filings ({report['verified']} with fully verified "
+                f"evidence) · about ${report['cost_usd']:.4f} in API cost."
+            )
+        for ticker, message in report["errors"]:
+            st.warning(f"{ticker}: {message}")
+
     if choice == "All portfolio":
         tickers = portfolio["ticker"].tolist()
     else:
@@ -377,6 +436,16 @@ def render_feed():
     if df.empty:
         st.info("Nothing matches the selected priorities. Add Low to see routine filings.")
         return
+
+    pending = df[(df["has_summary"] == 0) & (df["priority"].isin(["High", "Medium"]))]
+    if not is_configured():
+        st.caption("AI summaries are off. Add ANTHROPIC_API_KEY to the .env file and restart the app.")
+    elif not pending.empty:
+        batch = min(len(pending), SUMMARY_BATCH_LIMIT)
+        if st.button(f"Generate AI summaries for {batch} filings"):
+            with st.spinner("Reading filings and writing summaries..."):
+                st.session_state["summary_report"] = summarise_pending(pending, SUMMARY_BATCH_LIMIT)
+            st.rerun()
 
     shown = min(len(df), MAX_FEED_ITEMS)
     st.caption(

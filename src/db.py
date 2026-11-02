@@ -37,6 +37,25 @@ CREATE TABLE IF NOT EXISTS classifications (
     rules_version  TEXT NOT NULL,
     classified_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS summaries (
+    news_id               TEXT PRIMARY KEY,
+    what_happened         TEXT,
+    why_it_matters        TEXT,
+    investigate_next      TEXT,
+    key_evidence          TEXT,
+    appointee_background  TEXT,
+    llm_category          TEXT,
+    llm_priority          TEXT,
+    final_priority        TEXT,
+    final_rank            INTEGER,
+    basis                 TEXT NOT NULL,
+    evidence_verified     INTEGER NOT NULL DEFAULT 0,
+    model                 TEXT NOT NULL,
+    prompt_version        TEXT NOT NULL,
+    input_tokens          INTEGER,
+    output_tokens         INTEGER,
+    created_at            TEXT NOT NULL
+);
 """
 
 INSERT_SQL = """
@@ -57,9 +76,33 @@ VALUES
      :needs_llm, :rules_version, :classified_at)
 """
 
+SUMMARY_COLUMNS = [
+    "news_id",
+    "what_happened",
+    "why_it_matters",
+    "investigate_next",
+    "key_evidence",
+    "appointee_background",
+    "llm_category",
+    "llm_priority",
+    "final_priority",
+    "final_rank",
+    "basis",
+    "evidence_verified",
+    "model",
+    "prompt_version",
+    "input_tokens",
+    "output_tokens",
+    "created_at",
+]
+SUMMARY_SQL = (
+    f"INSERT OR REPLACE INTO summaries ({', '.join(SUMMARY_COLUMNS)}) "
+    f"VALUES ({', '.join(':' + c for c in SUMMARY_COLUMNS)})"
+)
+
 # Whitelist of sort orders, so user input never gets pasted into SQL
 ORDER_CLAUSES = {
-    "priority": "COALESCE(c.priority_rank, 0) DESC, a.filing_dt DESC",
+    "priority": "COALESCE(s.final_rank, c.priority_rank, 0) DESC, a.filing_dt DESC",
     "date": "a.filing_dt DESC",
 }
 
@@ -125,16 +168,31 @@ def upsert_classifications(rows: list) -> int:
     return len(rows)
 
 
-def read_announcements(tickers=None, since=None, priorities=None, order_by="priority") -> pd.DataFrame:
-    """Stored announcements joined with their classification.
+def upsert_summary(record: dict) -> None:
+    with get_connection() as conn:
+        conn.execute(SUMMARY_SQL, record)
 
+
+def read_announcements(tickers=None, since=None, priorities=None, order_by="priority") -> pd.DataFrame:
+    """Stored announcements joined with their classification and any AI summary.
+
+    `priority` is the final priority: the AI-adjusted one when a summary exists,
+    otherwise the rule-based one (kept separately as `rule_priority`).
     since: 'YYYY-MM-DD HH:MM:SS'. priorities: e.g. ['High']. order_by: 'priority' or 'date'.
     """
     query = """
-        SELECT a.*, c.fin_category, c.priority, c.priority_rank,
-               c.rule_id, c.reason, c.needs_llm
+        SELECT a.*,
+               c.fin_category, c.rule_id, c.reason, c.needs_llm,
+               c.priority AS rule_priority,
+               COALESCE(s.final_priority, c.priority) AS priority,
+               COALESCE(s.final_rank, c.priority_rank) AS priority_rank,
+               CASE WHEN s.news_id IS NULL THEN 0 ELSE 1 END AS has_summary,
+               s.what_happened, s.why_it_matters, s.investigate_next, s.key_evidence,
+               s.appointee_background, s.llm_category,
+               s.basis AS summary_basis, s.evidence_verified
         FROM announcements a
         LEFT JOIN classifications c ON c.news_id = a.news_id
+        LEFT JOIN summaries s ON s.news_id = a.news_id
         WHERE 1=1
     """
     params = []
@@ -145,14 +203,17 @@ def read_announcements(tickers=None, since=None, priorities=None, order_by="prio
         query += " AND a.filing_dt >= ?"
         params.append(since)
     if priorities:
-        query += f" AND c.priority IN ({','.join('?' * len(priorities))})"
+        query += (
+            " AND COALESCE(s.final_priority, c.priority) "
+            f"IN ({','.join('?' * len(priorities))})"
+        )
         params.extend(priorities)
     query += " ORDER BY " + ORDER_CLAUSES.get(order_by, ORDER_CLAUSES["date"])
 
     with get_connection() as conn:
         df = pd.read_sql_query(query, conn, params=params)
 
-    number_cols = ["priority_rank", "needs_llm"]
+    number_cols = ["priority_rank", "needs_llm", "has_summary", "evidence_verified"]
     text_cols = [c for c in df.columns if c not in number_cols]
     df[text_cols] = df[text_cols].fillna("")
     for col in number_cols:
