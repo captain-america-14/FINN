@@ -106,7 +106,7 @@ def numbers_supported(answer: str, source_text: str) -> bool:
 
 def _index_stamp(ticker: str) -> str:
     path = RAG_DIR / ticker / "faiss.index"
-    return str(path.stat().st_mtime) if path.exists() else "none"
+    return str(path.stat().st_size) if path.exists() else "none"
 
 
 def _cache_key(ticker: str, question: str, query: str, doc_types) -> str:

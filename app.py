@@ -21,6 +21,7 @@ from src.summarizer import SUMMARY_BATCH_LIMIT, is_configured, summarise_pending
 from src.documents import collect_documents, list_documents
 from src.rag import index_status, ingest_company, search_documents
 from src.qa import answer_question
+from src.seed import apply_secrets, demo_info, is_demo_mode, seed_if_needed
 st.set_page_config(
     page_title="FINN - Financial Investment Agent",
     page_icon="📈",
@@ -475,7 +476,7 @@ def render_documents(ticker: str, name: str):
             "Only these primary sources will be used to answer research questions; "
             "Screener's AI summaries and notes are ignored."
         )
-        if st.button(f"Collect documents for {name}"):
+        if not is_demo_mode() and st.button(f"Collect documents for {name}"):
             with st.spinner("Listing and downloading documents. This can take a minute or two..."):
                 result = collect_documents(ticker)
             if result["error"]:
@@ -719,7 +720,7 @@ def render_ask():
             "No documents are indexed for this company yet. Collect its documents in the Research tab, "
             "then build the index below."
         )
-    if st.button("Build or update the document index"):
+    if not is_demo_mode() and st.button("Build or update the document index"):
         with st.spinner("Reading PDFs and building the index. This can take several minutes..."):
             try:
                 result = ingest_company(ticker)
@@ -775,7 +776,17 @@ def render_ask():
 
 def main():
     inject_css()
+    apply_secrets()
+    seed_if_needed()
     render_header()
+    if is_demo_mode():
+        info = demo_info() or {}
+        companies = ", ".join(info.get("tickers", [])) or "the bundled companies"
+        st.info(
+            f"Demo deployment: prices, filings, results and documents are a saved snapshot "
+            f"({str(info.get('built_at', 'date unknown'))[:10]}). Document Q&A covers: {companies}. "
+            "Live fetching may be limited here."
+        )
     try:
         classify_pending()
     except Exception as err:
