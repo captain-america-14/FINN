@@ -144,9 +144,9 @@ def check_grounding(summary: dict, source_text: str):
     verified = [q for q in summary["evidence"] if _squash(q) and _squash(q) in source]
     quotes_ok = bool(summary["evidence"]) and len(verified) == len(summary["evidence"])
 
-    source_digits = source_text.replace(",", "")
+    source_numbers = {n.replace(",", "") for n in re.findall(r"\d[\d,]*(?:\.\d+)?", source_text)}
     numbers = [n.replace(",", "") for n in re.findall(r"\d[\d,]*(?:\.\d+)?", summary["what_happened"])]
-    numbers_ok = all(n in source_digits for n in numbers if len(re.sub(r"\D", "", n)) >= 2)
+    numbers_ok = all(n in source_numbers for n in numbers if len(re.sub(r"\D", "", n)) >= 2)
     return verified, quotes_ok and numbers_ok
 
 
@@ -187,7 +187,7 @@ def summarise_filing(row: dict) -> dict:
     if parsed is None:
         raise RuntimeError(f"Could not parse the model's reply after 2 attempts: {last_error}")
 
-    verified, fully_verified = check_grounding(parsed, block)
+    verified, fully_verified = check_grounding(parsed, block + " " + str(row.get("filing_dt") or ""))
     final = combine_priority(row.get("rule_priority", ""), bool(row.get("needs_llm")), parsed["priority"])
 
     record = {

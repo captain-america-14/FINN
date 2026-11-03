@@ -20,6 +20,7 @@ from src.results import available_bases, ebitda_label, get_growth_table, refresh
 from src.summarizer import SUMMARY_BATCH_LIMIT, is_configured, summarise_pending, summary_view
 from src.documents import collect_documents, list_documents
 from src.rag import index_status, ingest_company, search_documents
+from src.qa import answer_question
 st.set_page_config(
     page_title="FINN - Financial Investment Agent",
     page_icon="📈",
@@ -640,6 +641,66 @@ def passage_card_html(result: dict) -> str:
         f'<div style="font-size:0.85rem;margin-top:4px">{html.escape(text)}</div></details>'
         f"{link}</div>"
     )
+def queue_question(text: str):
+    st.session_state["queued_question"] = text
+
+
+def source_card_html(number: int, result: dict) -> str:
+    citation = html.escape(result["citation"])
+    text = result["text"]
+    snippet = html.escape(text[:450]) + ("…" if len(text) > 450 else "")
+    link = ""
+    if result["url"].startswith(("https://", "http://")):
+        link = f'<a href="{html.escape(result["url"], quote=True)}" target="_blank">Open the original document ↗</a>'
+    return (
+        '<div class="finn-card">'
+        f'<div style="font-size:0.75rem;color:#64748B"><b>[{number}]</b> {citation}</div>'
+        f'<div style="font-size:0.88rem;margin:4px 0">{snippet}</div>'
+        '<details><summary style="cursor:pointer;font-size:0.8rem">Show the full passage</summary>'
+        f'<div style="font-size:0.85rem;margin-top:4px">{html.escape(text)}</div></details>'
+        f"{link}</div>"
+    )
+
+
+def render_answer(question: str, result: dict):
+    st.markdown(f"**{question}**")
+    status = result["status"]
+    if status == "ok":
+        if not result["found"]:
+            st.warning("The company's documents do not contain a clear answer to this question.")
+        st.markdown(result["answer"])
+        if result["found"]:
+            if result["numbers_verified"]:
+                st.caption("✓ Every figure appears in the cited passages.")
+            else:
+                st.caption("⚠ Some figures could not be matched to the cited passages. Check the sources below.")
+        if result.get("cached"):
+            st.caption("Saved answer (no new AI call was used).")
+    elif status == "uncited":
+        st.warning("The model's answer did not cite any passage, so it was withheld. The closest passages are below.")
+    elif status == "llm_off":
+        st.info("AI answers are off (add GEMINI_API_KEY to .env). The closest passages are below.")
+    elif status == "llm_error":
+        st.warning(f"The AI step failed: {result['message']} The closest passages are below.")
+    elif status == "no_passages":
+        st.info("No passages found. Try different wording, or search all documents.")
+    elif status == "no_index":
+        st.info("Build this company's document index first.")
+
+    passages = result.get("passages", [])
+    cited = set(result.get("cited", []))
+    if passages:
+        main = [(n, p) for n, p in enumerate(passages, start=1) if n in cited or not cited]
+        rest = [(n, p) for n, p in enumerate(passages, start=1) if (n, p) not in main]
+        st.markdown("**Sources**" if cited else "**Closest passages**")
+        st.markdown("".join(source_card_html(n, p) for n, p in main), unsafe_allow_html=True)
+        if rest:
+            with st.expander(f"Other passages retrieved ({len(rest)})"):
+                st.markdown("".join(source_card_html(n, p) for n, p in rest), unsafe_allow_html=True)
+        st.caption("Page numbers are PDF viewer pages, which can differ from the numbers printed on the page.")
+
+    for i, follow_up in enumerate(result.get("follow_ups", [])):
+        st.button(follow_up, key=f"follow_up_{i}_{abs(hash(follow_up))}", on_click=queue_question, args=(follow_up,))
 def render_ask():
     st.subheader("Ask FINN")
     try:
@@ -659,10 +720,7 @@ def render_ask():
             "then build the index below."
         )
     if st.button("Build or update the document index"):
-        with st.spinner(
-            "Reading PDFs and building the index. The first run downloads a small embedding model "
-            "and can take several minutes..."
-        ):
+        with st.spinner("Reading PDFs and building the index. This can take several minutes..."):
             try:
                 result = ingest_company(ticker)
             except Exception as err:
@@ -675,7 +733,6 @@ def render_ask():
                 for problem in result["problems"]:
                     st.warning(problem)
         status = index_status(ticker)
-
     if not status["indexed"]:
         return
 
@@ -688,26 +745,33 @@ def render_ask():
         "Annual reports": ["annual_report"],
         "Call transcripts": ["transcript"],
     }[scope]
-    question = st.text_input(
-        "Ask a question about this company",
-        placeholder="e.g. What did management say about margins?",
-        key="ask_question",
-    )
-    if not question.strip():
-        st.caption(
-            "Retrieval preview: FINN finds the most relevant passages in the company's own annual reports "
-            "and call transcripts. AI-written answers built on these passages come next."
+
+    with st.form("ask_form"):
+        typed = st.text_input(
+            "Ask a question about this company",
+            placeholder="e.g. What did management say about margins?",
         )
-        return
+        submitted = st.form_submit_button("Ask FINN")
 
-    with st.spinner("Searching the documents..."):
-        results = search_documents(ticker, question, doc_types=doc_types)
-    if not results:
-        st.info("No passages found. Try different wording, or search all documents.")
-        return
-    st.markdown("".join(passage_card_html(r) for r in results), unsafe_allow_html=True)
-    st.caption("Page numbers are PDF viewer pages, which can differ from the numbers printed on the page.")
+    question = st.session_state.pop("queued_question", None)
+    if submitted and typed.strip():
+        question = typed.strip()
 
+    if question:
+        previous = st.session_state.get("ask_previous", {}).get(ticker)
+        with st.spinner("Reading the documents and writing a cited answer..."):
+            result = answer_question(ticker, name, question, doc_types, previous)
+        st.session_state.setdefault("ask_previous", {})[ticker] = question
+        st.session_state["ask_last"] = {"ticker": ticker, "question": question, "result": result}
+
+    last = st.session_state.get("ask_last")
+    if last and last["ticker"] == ticker:
+        render_answer(last["question"], last["result"])
+    else:
+        st.caption(
+            "FINN answers only from the company's own annual reports and call transcripts, "
+            "cites every claim, and says so when the documents don't contain the answer."
+        )
 
 def main():
     inject_css()
